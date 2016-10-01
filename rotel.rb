@@ -44,7 +44,7 @@ class Rotel
                  'usb' => 'usb',
                  'pc_usb' => 'pc_usb',
                  'bal_xlr' => 'bal_xlr',
-                 'xlr' => 'xlr',
+                 'xlr' => 'bal_xlr',
                  'pc' => 'pc_usb',
     }
     self
