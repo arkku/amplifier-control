@@ -1,0 +1,13 @@
+service amplistener
+{
+	disable = no
+	socket_type = stream
+	protocol = tcp
+	port = 65432
+	server = /etc/rotel/amplifier-inetd.sh
+	user = shairport-sync
+	group = dialout
+	instances = 10
+	wait = no
+	log_type = SYSLOG daemon debug
+}

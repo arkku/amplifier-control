@@ -1,0 +1,10 @@
+#!/usr/bin/env osascript
+# Prints out the state of iTunes (playing/stopped/paused).
+# If iTunes is not running, does nothing.
+
+if application "iTunes" is running then
+    tell application "iTunes"
+      set playerState to player state
+      do shell script "echo " & playerState
+    end tell
+end if
