@@ -2,28 +2,38 @@
 # A script to watch for changes in iTunes state (playing vs not playing)
 # and send a message over TCP to a server when iTunes starts playing.
 # The intent is that the server is controlling the audio amplifier and
-# switches automatically to the correct input on the amp when iTunes starts
+# switches automatically to the correct input on the amp when iTunes
+# starts
 # playing.
 
-# The server which controls the amplifier:
+# The server (hostname) which controls the amplifier
 AMP_SERVER='pi.local'
+
+# Amplifier control port on the server
 SERVER_PORT=65432
 
-# The input on the amplifier which iTunes plays to:
-MY_INPUT='opt1'
+# Amplifier input to which we should switch when playing
+AMP_INPUT='opt1'
 
 cd $(dirname "$0")
 previous_state=''
 while true; do
     current_state=$(./itunes-state)
     if [ ! "$current_state" = "$previous_state" ]; then
-        previous_state="$current_state"
         if [ "$current_state" = 'playing' ]; then
-            echo "iTunes started playing" >&2
-            echo "playing $MY_INPUT" | nc "$AMP_SERVER" "$SERVER_PORT" >&2
+            if ./itunes-active-devices | grep -q '^Computer$'; then
+                echo "iTunes started playing" >&2
+                echo "playing $AMP_INPUT" | nc "$AMP_SERVER" "$SERVER_PORT" >&2
+            else
+                current_state='airplay'
+                if [ ! "$previous_state" = 'airplay' ]; then
+                    echo 'iTunes is on AirPlay' >&2
+                fi
+            fi
         else
             echo "iTunes stopped playing" >&2
         fi
+        previous_state="$current_state"
     fi
     if [ "$current_state" = 'playing' ]; then
         sleep 30
@@ -31,4 +41,3 @@ while true; do
         sleep 2
     fi
 done
-

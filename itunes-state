@@ -5,6 +5,6 @@
 if application "iTunes" is running then
     tell application "iTunes"
       set playerState to player state
-      do shell script "echo " & playerState
+      return playerstate
     end tell
 end if

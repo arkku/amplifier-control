@@ -1,0 +1,24 @@
+#!/usr/bin/env osascript
+# If (and only if) iTunes is running, prints out the names
+# of the current AirPlay devices (the computer itself is
+# called "Computer").
+
+set output to ""
+
+if application "iTunes" is running then
+    tell application "iTunes"
+        set allDevices to (get reference to AirPlay devices)
+        repeat with device in allDevices
+            if device's active is true then
+                set output to output & (device's name) & "\n"
+            end if
+        end repeat
+    end tell
+end if
+
+if output is "" then
+    set output to "Computer\n"
+end if
+
+return text 1 thru -2 of output
+# remove empty line ^
