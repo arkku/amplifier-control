@@ -1,16 +1,4 @@
 #!/usr/bin/env ruby
-# A simple Ruby class for controlling a Rotel amplifier, specifically
-# RA-1570 but the protocol is probably used in others as well.
-# 
-# Requires the `serialport` gem.
-#
-# Note that the amplifier is a bit evil in that it can send sudden
-# status updates at any time, which messes things up if you are
-# expecting a specific response.
-#
-# By Kimmo Kulovesi <http://arkku.com>
-# Use at your own risk only!
-
 require 'rubygems'
 require 'serialport'
 
@@ -19,16 +7,27 @@ class Rotel
   attr_reader :serial
   attr_reader :sources
   attr_reader :max_volume
+  attr_reader :was_off
 
-  def initialize(serial_device = "/dev/ttyAMA0")
+  def initialize(serial_device: "/dev/ttyAMA0", power_on: false)
     @serial = SerialPort.new(serial_device, 115200, 8, 1, SerialPort::NONE)
+    @serial.read_timeout = 5000
+    @serial.flow_control = SerialPort::NONE
+    begin
+      @serial.autoclose = true
+      #@serial.ioctl(0x540C, 1)
+    rescue Exception => e
+    end
     @max_volume = 96
     begin
       @serial.flush
-      write '!power_on!get_volume_max!'
-      str = read_until(/volume/)
-      if str.slice!(/^volume_max=/)
-        @max_volume = str.to_i
+      write '!!!get_current_power!'
+      str = read_until(/power|volume/).to_s
+      if !str.to_s.include? 'power=on'
+        @was_off = str.include? 'standby'
+        write '!power_on!' if power_on
+      else
+        @was_off = false
       end
     rescue Exception => e
     end
@@ -44,7 +43,7 @@ class Rotel
                  'usb' => 'usb',
                  'pc_usb' => 'pc_usb',
                  'bal_xlr' => 'bal_xlr',
-                 'xlr' => 'bal_xlr',
+                 'xlr' => 'xlr',
                  'pc' => 'pc_usb',
     }
     self
@@ -52,6 +51,10 @@ class Rotel
 
   def log(msg)
     $stderr.puts "Rotel: #{msg}"
+  end
+
+  def flush
+    @serial.flush_input
   end
 
   def read
@@ -79,6 +82,17 @@ class Rotel
     return if msg.empty?
     log "<< #{msg}"
     @serial.write("!#{msg}")
+  end
+
+  def power
+    write 'get_current_power!'
+    str = read
+    return nil unless str.slice!(/^power=/)
+    return (str.to_s =~ /^on/) ? true : false
+  end
+
+  def power=(state)
+    write "power_#{state ? 'on' : 'off'}!"
   end
 
   def source

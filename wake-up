@@ -1,0 +1,4 @@
+#!/bin/bash
+INPUT="$1"
+[ -z "$INPUT" ] && INPUT='opt2'
+echo wake "$INPUT" | nc 127.0.0.1 65015

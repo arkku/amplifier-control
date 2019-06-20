@@ -37,14 +37,27 @@ I believe similar protocols are used on other Rotel devices with RS-232
 control. Other manufacturers surely have their own protocols and settings, but
 the basic ideas are the same.
 
+### Control Server
+
+One problem with running a new script every time an action is taken is that
+multiple scripts in rapid succession can read partial data from the serial
+port, or alternatively end up blocking one another. Hence the server,
+`rotel-server.rb` was born: it is run as a daemon (see `rotel-server.initd`
+for the `/etc/init.d` script), and maintains a single open descriptor to
+the serial port, while processing commands received via TCP (listening only
+on the loopback interface at `127.0.0.1`). This allows very rapid commands
+like interactive volume control. Most of the other scripts are now implemented
+using it, but `switch-to-input` falls back to the stand-alone version as
+needed.
+
 ## Switching Inputs Locally
 
 The Ruby "library" `rotel.rb` contains an implementation of a subset of the
 amplifier's control protocol. Communication happens over serial port using the
 `serialport` gem (install with `gem install serialport`).
 
-The Ruby script `amp-switch-to-input` uses the library to switch to the input
-named on the command line (e.g., `amp-switch-to-input coax1`). It also ensures
+The Ruby script `switch-to-input.rb` uses the library to switch to the input
+named on the command line (e.g., `switch-to-input.rb coax1`). It also ensures
 the volume is at a safe level before switching. See this script for a reference
 of how to control the amplifier with Ruby.
 
@@ -52,8 +65,12 @@ of how to control the amplifier with Ruby.
 
 The machine controlling the input switching is also running *shairport-sync*,
 an open-source implementation of an AirPlay server. The included
-`shairport-sync.conf` simply uses the `run_this_before_play_begins` hook to
-run the `amp-switch-to-input` Ruby script.
+`shairport-sync.conf` calls the switch-to-input and set-volume scripts.
+
+### raspotify/librespotify
+
+The script `librespot-event` can be set up to respond to the `--onevent`
+call of *Raspotify*, as seen in `raspotify.default`.
 
 ## Remote Switching of Inputs
 

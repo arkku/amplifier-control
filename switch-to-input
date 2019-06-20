@@ -1,0 +1,4 @@
+#!/bin/bash
+INPUT="$1"
+[ -z "$INPUT" ] && INPUT='coax1'
+(echo input "$INPUT" | nc 127.0.0.1 65015) || /etc/rotel/switch-to-input.rb "$INPUT"

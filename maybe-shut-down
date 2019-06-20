@@ -1,0 +1,2 @@
+#!/bin/bash
+echo maybe opt2 coax1 | nc 127.0.0.1 65015
