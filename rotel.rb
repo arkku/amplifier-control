@@ -1,6 +1,7 @@
 #!/usr/bin/env ruby
 require 'rubygems'
 require 'serialport'
+require 'timeout'
 
 class Rotel
 
@@ -11,7 +12,7 @@ class Rotel
 
   def initialize(serial_device: "/dev/ttyAMA0", power_on: false)
     @serial = SerialPort.new(serial_device, 115200, 8, 1, SerialPort::NONE)
-    @serial.read_timeout = 5000
+    @serial.read_timeout = 3000
     @serial.flow_control = SerialPort::NONE
     begin
       @serial.autoclose = true
@@ -19,15 +20,30 @@ class Rotel
     rescue Exception => e
     end
     @max_volume = 96
+    @maybe_off = true
     begin
       @serial.flush
       write '!!!get_current_power!'
       str = read_until(/power|volume/).to_s
       if !str.to_s.include? 'power=on'
         @was_off = str.include? 'standby'
-        write '!power_on!' if power_on
+        if power_on
+          write 'power_on!'
+          str = read_until(/power|volume/).to_s
+          if str.include? 'power=on'
+            @maybe_off = false
+            write 'display_update_manual!'
+            read_until(/display_update/).to_s
+            @serial.flush
+          end
+        else
+          @maybe_off = true
+        end
       else
+        write 'display_update_manual!'
+        read_until(/display_update/).to_s
         @was_off = false
+        @maybe_off = false
       end
     rescue Exception => e
     end
@@ -43,7 +59,7 @@ class Rotel
                  'usb' => 'usb',
                  'pc_usb' => 'pc_usb',
                  'bal_xlr' => 'bal_xlr',
-                 'xlr' => 'xlr',
+                 'xlr' => 'bal_xlr',
                  'pc' => 'pc_usb',
     }
     self
@@ -59,15 +75,21 @@ class Rotel
 
   def read
     result = ''
-    loop do
-      r = @serial.read(1)
-      break if r.nil?
-      #r = r.chr
-      break if r == '!'
-      result << r
+    begin
+      Timeout::timeout(4) do
+        loop do
+          r = @serial.read(1)
+          break if r.nil?
+          #r = r.chr
+          break if r == '!'
+          result << r
+        end
+      end
+    rescue Exception => e
+      #
     end
     log ">> #{result}" unless result.empty?
-    result
+    return result
   end
 
   def read_until(re)
@@ -92,7 +114,24 @@ class Rotel
   end
 
   def power=(state)
-    write "power_#{state ? 'on' : 'off'}!"
+    if state
+      if @maybe_off
+        write "power_on!"
+        @maybe_off = false
+        str = read_until(/power/).to_s
+        @serial.flush
+        write 'display_update_manual!'
+        read_until(/display_update/).to_s
+        @serial.flush
+        return str.include? 'power=on'
+      end
+      write "power_on!"
+    else
+      write "power_off!"
+      @maybe_off = true
+    end
+    str = read_until(/power/).to_s
+    return str.include? 'power=on'
   end
 
   def source
@@ -120,6 +159,24 @@ class Rotel
     v = value.to_i
     write "volume_#{v}!"
     volume
+  end
+
+  def muted?
+    write 'get_mute_status!'
+    str = read_until(/mute/)
+    return false unless str.slice!(/^mute=/)
+    return str == 'on'
+  end
+
+  def muted=(state)
+    write "mute_#{state ? 'on' : 'off'}!"
+    str = read_until(/mute/)
+    return false unless str.slice!(/^mute=/)
+    return (str == 'on')
+  end
+
+  def send_button(button)
+    write "#{button}!"
   end
 
   def speakers

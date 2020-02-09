@@ -6,8 +6,7 @@ require 'socket'
 require 'timeout'
 require_relative 'rotel'
 
-max_volume = 50
-min_volume = 10
+max_volume = 55
 attempts_remaining = 10
 
 $mutex = Mutex.new
@@ -55,10 +54,10 @@ loop do
       attempts_remaining = 10
     end
     Thread.start(client) do |client|
-      log = '#'
+      log = ''
       command = nil
       begin
-        Timeout::timeout(5) do
+        Timeout::timeout(3) do
           command = client.gets
         end
       rescue Exception => e
@@ -74,16 +73,28 @@ loop do
           source = nil
           volume = nil
           power = :keep
+          speakers = :keep
 
           case fields.first.to_s
           when 'vol', 'volume'
             if fields.count == 2
-              volume = fields[1].to_f
+              volume = fields[1].to_s
             elsif fields.count > 2
               source = fields[1]
-              volume = fields[2].to_f
+              volume = fields[2].to_s
             else
               log = '?'
+            end
+            if volume == '0.0'
+              volume = nil
+            elsif volume == '1.0'
+              volume = max_volume
+            elsif volume =~ /^-/
+              volume = max_volume.to_f + volume.to_f
+            else
+              volume = volume.to_f
+              volume *= 100.0 if volume < 1.0
+              volume = max_volume.to_f * (volume / 100.0)
             end
           when 'in', 'input'
             if fields.count >= 2
@@ -92,7 +103,13 @@ loop do
               log = '?'
             end
             power = :on
-          when 'wake'
+          when 'source'
+            if fields.count >= 2
+              source = fields[1].to_s
+            else
+              log = '?'
+            end
+          when 'wake', 'on'
             if $rotel && !$rotel.power
               power = :on
               source = fields[1] if fields.count == 2
@@ -101,9 +118,107 @@ loop do
             if fields.count == 1 || ($rotel && fields.include?($rotel.source))
               power = :off
             end
+          when 'power'
+            if fields.count == 2
+              value = fields[1].to_s.downcase
+              if value == 'on' || value == 'true' || value == '1'
+                power = :on
+              else
+                power = :off
+              end
+            end
           when 'maybe'
             if $rotel && $rotel.power && $rotel.volume <= 10 && (fields.count == 1 || fields.include?($rotel.source))
               power = :off
+            end
+          when 'mute'
+            if fields.count == 2 && $rotel && $rotel.power
+              value = fields[1].to_s.downcase
+              if value == 'on' || value == 'true' || value == '1'
+                log = ($rotel.muted = true) ? 'true' : 'false'
+              else
+                log = ($rotel.muted = false) ? 'true' : 'false'
+              end
+            end
+          when 'speakers'
+            if fields.count == 2
+              value = fields[1].to_s.downcase
+              if value == 'a'
+                speakers = :a
+              elsif value == 'b'
+                speakers = :b
+              elsif value == 'ab'
+                speakers = :both
+              elsif value == 'off' || value == 'none'
+                speakers = :off
+              end
+            end
+          when 'a'
+            if fields.count == 2
+              value = fields[1].to_s.downcase
+              value = (value == 'on' || value == 'true' || value == '1')
+              current = $rotel.speakers
+              if value
+                speakers = (current == :b ? :both : :a)
+              else
+                speakers = (current == :both ? :b : :off)
+              end
+            end
+          when 'b'
+            if fields.count == 2
+              value = fields[1].to_s.downcase
+              value = (value == 'on' || value == 'true' || value == '1')
+              current = $rotel.speakers
+              if value
+                speakers = (current == :a ? :both : :b)
+              else
+                speakers = (current == :both ? :a : :off)
+              end
+            end
+          when 'key', 'button'
+            if fields.count >= 2 && $rotel && $rotel.power
+              $rotel.send_button(fields[1].to_s.downcase)
+            end
+          when '?'
+            if fields.count >= 2
+              power_state = ($rotel && $rotel.power)
+              case fields[1].to_s.downcase
+              when 'power'
+                log = power_state ? 'on' : 'off'
+              when 'on'
+                log = power_state ? 'true' : 'false'
+              when 'vol', 'volume'
+                if power_state
+                  value = (($rotel.volume.to_f * (100.0 / max_volume.to_f)) + 0.5).to_i
+                  value = 100 if value > 100
+                  log = value.to_s
+                end
+              when 'in', 'input', 'source'
+                log = $rotel.source.to_s if power_state
+              when 'speakers'
+                log = $rotel.speakers.to_s if power_state
+              when 'a'
+                if power_state
+                  current = $rotel.speakers
+                  log = (current == :a || current == :both) ? 'true' : 'false'
+                end
+              when 'b'
+                if power_state
+                  current = $rotel.speakers
+                  log = (current == :b || current == :both) ? 'true' : 'false'
+                end
+              when 'mute', 'muted'
+                log = (power_state && $rotel.muted? ? 'true' : 'false')
+              else
+                query = fields[1].to_s.downcase
+                if power_state && $rotel.sources.include?(query)
+                  log = ($rotel.source == query) ? 'true' : 'false'
+                else
+                  log = 'false'
+                end
+              end
+            else
+              log = '?'
             end
           else
             source = fields.first
@@ -112,37 +227,45 @@ loop do
           case power
           when :on
             $rotel.power = true if $rotel
-            log = '# on'
+            log = 'true'
           when :off
             $rotel.power = false if $rotel
-            log = '# off'
+            log = 'false'
           else
             #
           end
-          if !volume.nil?
-            if source.nil? || ($rotel && $rotel.source == source)
-              target_volume = (max_volume + volume + 0.5).to_i
+
+          if $rotel && $rotel.power && speakers != :keep && $rotel.speakers != speakers
+            $rotel.speakers = speakers
+          end
+
+          if volume != nil
+            if $rotel && $rotel.power && (source.nil? || $rotel.source == source)
+              target_volume = (volume.to_f + 0.5).to_i
               target_volume = 0 if target_volume < 0
               target_volume = max_volume if target_volume > max_volume
               $stderr.puts("! Volume #{target_volume} on #{source}\n")
               $rotel.volume = target_volume if $rotel
-              log = "# volume #{target_volume}"
+              log = (target_volume.to_f * (100 / max_volume.to_f) + 0.5).to_i.to_s
             else
-              log = "! #{source}"
+              log = 'false'
             end
           elsif source
             source = source.downcase
-            if $rotel && $rotel.sources.include?(source)
+            if $rotel && $rotel.power && $rotel.sources.include?(source)
               $stderr.puts("! Source: #{source}\n")
               attempts = 10
               while attempts > 0 && $rotel.source != source
-                $rotel.source = source
+                log = ($rotel.source = source).to_s.strip
+                break if log == source
                 attempts -= 1
               end
               $keep_running = false if attempts < 1
-              log = "# source #{source}"
-            else
-              log = "! #{source}"
+              attempts = 3
+              while attempts > 0 && log.empty?
+                log = $rotel.source.to_s.strip
+                attempts -= 1
+              end
             end
           end
           $rotel.flush if $rotel

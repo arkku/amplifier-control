@@ -1,0 +1,2 @@
+#!/bin/bash
+echo '? power' | nc 127.0.0.1 65015 2>/dev/null
