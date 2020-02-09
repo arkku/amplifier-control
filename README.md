@@ -16,7 +16,7 @@ running *iTunes*. Starting playback on *iTunes* (usually via the *Remote* app
 on an iPad) sends a TCP message to the Raspberry Pi, instructing it to
 switch to the corresponding input.
 
-~ [Kimmo Kulovesi](http://arkku.com/), 2016-10-01
+~ [Kimmo Kulovesi](https://arkku.dev/), 2016-10-01
 
 
 ## Serial Port Control
@@ -108,4 +108,12 @@ placed in `~/Library/LaunchAgents` (with the paths and username inside the
 file edited) and loaded with:
 
     launchctl load ~/Library/LaunchAgents/com.arkku.itunes.plist
+
+## Homekit Control
+
+I wrote a little Homebridge plugin to interface with the `rotel-server.rb`
+service, which makes it possible to control the amplifiar via Homekit (e.g.,
+"Hey Siri, turn off amplifier"). It resides in a [separate
+repository](https://github.com/arkku/homebridge-rotel-arkku/)
+for ease of installation into Homekit.
 
