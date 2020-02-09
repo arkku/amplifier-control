@@ -135,8 +135,10 @@ loop do
             if fields.count == 2 && $rotel && $rotel.power
               value = fields[1].to_s.downcase
               if value == 'on' || value == 'true' || value == '1'
+                $stderr.puts "! Mute: on"
                 log = ($rotel.muted = true) ? 'true' : 'false'
               else
+                $stderr.puts "! Mute: off"
                 log = ($rotel.muted = false) ? 'true' : 'false'
               end
             end
@@ -226,9 +228,11 @@ loop do
 
           case power
           when :on
+            $stderr.puts "! Power: on"
             $rotel.power = true if $rotel
             log = 'true'
           when :off
+            $stderr.puts "! Power: off"
             $rotel.power = false if $rotel
             log = 'false'
           else
@@ -236,6 +240,7 @@ loop do
           end
 
           if $rotel && $rotel.power && speakers != :keep && $rotel.speakers != speakers
+            $stderr.puts "! Speakers: #{speakers}"
             $rotel.speakers = speakers
           end
 

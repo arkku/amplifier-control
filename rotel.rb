@@ -22,8 +22,7 @@ class Rotel
     @max_volume = 96
     @maybe_off = true
     begin
-      @serial.flush
-      write '!!!get_current_power!'
+      write '!!get_current_power!'
       str = read_until(/power|volume/).to_s
       if !str.to_s.include? 'power=on'
         @was_off = str.include? 'standby'
@@ -34,7 +33,6 @@ class Rotel
             @maybe_off = false
             write 'display_update_manual!'
             read_until(/display_update/).to_s
-            @serial.flush
           end
         else
           @maybe_off = true
@@ -102,36 +100,37 @@ class Rotel
   def write(msg)
     msg = msg.to_s
     return if msg.empty?
+    @serial.flush
     log "<< #{msg}"
     @serial.write("!#{msg}")
   end
 
   def power
     write 'get_current_power!'
-    str = read
-    return nil unless str.slice!(/^power=/)
-    return (str.to_s =~ /^on/) ? true : false
+    str = read.to_s
+    if str.slice!(/^power=/)
+      str.to_s.include? 'on'
+    else
+      str = read.to_s
+      return nil if str.nil? || str.empty?
+      str.include? 'power=on'
+    end
   end
 
   def power=(state)
     if state
-      if @maybe_off
-        write "power_on!"
-        @maybe_off = false
-        str = read_until(/power/).to_s
-        @serial.flush
-        write 'display_update_manual!'
-        read_until(/display_update/).to_s
-        @serial.flush
-        return str.include? 'power=on'
-      end
       write "power_on!"
+      @maybe_off = false
+      str = read_until(/power=/).to_s
+      str = read_until(/power=/).to_s if !str.include? 'power=on'
+      return power if str.nil? or str.empty?
+      return str.include? 'power=on'
     else
       write "power_off!"
       @maybe_off = true
+      str = read_until(/power/).to_s
+      return str.include? 'on'
     end
-    str = read_until(/power/).to_s
-    return str.include? 'power=on'
   end
 
   def source
