@@ -21,37 +21,28 @@
 
 require 'rubygems'
 require 'serialport'
-require 'em/pure_ruby'
+require 'socket'
+
+#require 'em/pure_ruby'
+require 'eventmachine'
 
 module EventMachine
+  if defined?(EventMachine.library_type) && EventMachine.library_type == :pure_ruby
+    # A serial port stream object for use with EventMachine.
+    class StreamSerial < StreamObject
+      attr_reader :serial_port
 
-  # A serial port stream object for use with EventMachine.
-  class StreamSerial < StreamObject
-    attr_reader :serial_port
+      # Open serial port `device` at the given settings.
+      def self.open(device, baud:, bits: 8, stop_bits: 1, parity: SerialPort::NONE, flow_control: SerialPort::NONE)
+        serial = SerialPort.new(device, baud, bits, stop_bits, parity)
+        serial.flow_control = flow_control
+        self.new serial
+      end
 
-    # Open serial port `device` at the given settings.
-    def self.open(device, baud:, bits: 8, stop_bits: 1, parity: SerialPort::NONE, flow_control: SerialPort::NONE)
-      serial = SerialPort.new(device, baud, bits, stop_bits, parity)
-      serial.flow_control = flow_control
-      self.new serial
-    end
-
-    def initialize(io)
-      @serial_port = io
-      super
-    end
-  end
-
-  class << self
-  public
-
-    # Open serial port `device` at the given settings, and create a new
-    # `Connection` subclass instance (class or module passed as `handler`)
-    # to handle it. An optional block may be given, to which the resulting
-    # instance is yielded.
-    def open_serial(device, baud:, bits: 8, stop_bits: 1, parity: SerialPort::NONE, flow_control: SerialPort::NONE, handler: nil)
-      serial_stream = StreamSerial.open(device, baud: baud, bits: bits, stop_bits: stop_bits, parity: parity, flow_control: flow_control)
-      connection_for_serial_stream(serial_stream, handler: handler)
+      def initialize(io)
+        @serial_port = io
+        super
+      end
     end
 
     # Create a new `Connection` subclass instance (class or module passed
@@ -69,6 +60,24 @@ module EventMachine
       @conns[uuid] = connection
       yield connection if block_given?
       connection
+    end
+  end
+
+  class << self
+  public
+    # Open serial port `device` at the given settings, and create a new
+    # `Connection` subclass instance (class or module passed as `handler`)
+    # to handle it. An optional block may be given, to which the resulting
+    # instance is yielded.
+    def open_serial(device, baud:, bits: 8, stop_bits: 1, parity: SerialPort::NONE, flow_control: SerialPort::NONE, handler: nil)
+      if defined?(EventMachine.library_type) && EventMachine.library_type == :pure_ruby
+        serial_stream = StreamSerial.open(device, baud: baud, bits: bits, stop_bits: stop_bits, parity: parity, flow_control: flow_control)
+        connection_for_serial_stream(serial_stream, handler: handler)
+      else
+        serial = SerialPort.new(device, baud, bits, stop_bits, parity)
+        serial.flow_control = flow_control
+        attach(serial, handler)
+      end
     end
   end
 end
@@ -260,6 +269,10 @@ class RotelAmplifier
   # than 1 reduces spam in logs when the volume is incrementally adjusted.
   attr_accessor :volume_report_threshold
 
+  # A settable flag to detect inactivity. Messages from the amplifier reset
+  # this to `false`.
+  attr_accessor :inactive
+
   # Initialize with `connection`, a `RotelConnection` instance. The
   # `log` output may be given to enable logging (e.g., `$stderr`).
   # The amplifier supports reporting its display contents whenever they
@@ -319,6 +332,7 @@ class RotelAmplifier
     @future_speakersB = nil
     @last_reported_volume = -100
     @volume_report_threshold = 1
+    @inactive = true
 
     # Subscribe to state changes
     @connection.subscribe(&method(:handle_message))
@@ -702,6 +716,7 @@ class RotelAmplifier
     msg = message.to_s.gsub(/[^a-zA-Z0-9=_,.\/:+-]+/, '')
     return if msg.empty?
 
+    @inactive = false
     is_power_event = false
     old_volume = @volume_raw
 
@@ -916,20 +931,26 @@ module RotelServer
 
     case fields[0].to_s
     when 'wake', 'on'
+      @rotel.inactive = false
       @rotel.power = true
     when 'off', 'standby'
+      @rotel.inactive = false
       @rotel.power = false
     when 'power'
+      @rotel.inactive = false
       @rotel.power = parse_boolean(fields[1].to_s)
     when 'in', 'input'
+      @rotel.inactive = false
       src = fields[1].to_s
       if @rotel.sources[src]
         @rotel.power = true
         @rotel.set_source(src)
       end
     when 'source'
+      @rotel.inactive = false
       @rotel.set_source(fields[1].to_s)
     when 'vol', 'volume'
+      @rotel.inactive = false
       vol = nil
       if fields.count == 2
         vol = fields[1].to_s
@@ -961,6 +982,17 @@ module RotelServer
       else
         @rotel.power
       end
+    when 'sleep'
+      timeout = 30
+      timeout = fields[1].to_f if fields.count >= 2
+      @rotel.inactive = true
+      set_timer(timeout) do
+        if @rotel.inactive && @rotel.power
+          log "! Sleep timer expired without activity, power off"
+          @rotel.power = false
+        end
+      end
+      timeout
     when 'mute'
       @rotel.mute = parse_boolean(fields[1].to_s)
     when 'speakers'
@@ -1045,6 +1077,10 @@ module RotelServer
     log "|#{@peer} << #{msg}"
     send_data "#{msg}\n"
   end
+
+  def set_timer(timeout, &block)
+    EventMachine::Timer.new(timeout.to_f, &block)
+  end
 end
 
 server_ip = '127.0.0.1'
@@ -1071,6 +1107,8 @@ ARGV.each do |arg|
     end
   when '-n'
     detach_process = false
+  when '-u'
+    update_display = true
   when /^[0-9]+$/
     server_port = arg.to_i
   when /^\/dev\//
@@ -1078,7 +1116,7 @@ ARGV.each do |arg|
   when /^([0-9a-z]+[.:]+)+[a-z]+$/
     server_ip = arg
   when '--help', '-h', '--version'
-    $stderr.puts 'rotel-server by Kimmo Kulovesi <https://arkku.dev/>, 2020'
+    $stderr.puts 'rotel-server by Kimmo Kulovesi <https://arkku.dev/>, 2020-2021'
     exit 0 if arg == '--version'
     $stderr.puts 'Arguments:'
     $stderr.puts '  -d          detach/daemonize process'
@@ -1086,6 +1124,7 @@ ARGV.each do |arg|
     $stderr.puts '  -v          verbose'
     $stderr.puts '  -v -v       very verbose'
     $stderr.puts '  -v -v -v    very, very verbose (serial data to stderr)'
+    $stderr.puts '  -u          listen to display content updates'
     $stderr.puts "  /dev/ttyS0  serial port device (default #{serial_device})"
     $stderr.puts "  0.0.0.0     IP address (default #{server_ip})"
     $stderr.puts "  1234        TCP port (default #{server_port})"
@@ -1098,6 +1137,8 @@ ARGV.each do |arg|
   end
 end
 
+socket_from_systemd = (ENV['LISTEN_PID'].to_i == $$) ? Socket.for_fd(3) : nil
+
 Thread.report_on_exception = true if Thread.respond_to? :report_on_exception
 Process.daemon if detach_process
 
@@ -1108,7 +1149,14 @@ EventMachine.run do
   rotel.volume_raw_limit = volume_limit
 
   # Reduce volume state logging spam when detached and not very verbose
-  rotel.volume_report_threshold = (detach_process && !net_log_output ? 10 : 1)
+  rotel.volume_report_threshold = (!net_log_output ? 10 : 1)
 
-  EventMachine.start_server(server_ip, server_port, RotelServer, rotel, net_log_output)
+  if socket_from_systemd.nil?
+    log_output.puts("Starting server on port #{server_ip} port #{server_port}") if log_output
+    EventMachine.start_server(server_ip, server_port, RotelServer, rotel, net_log_output)
+  else
+    log_output.puts("Attaching to socket from systemd") if log_output
+    EventMachine.attach_server(socket_from_systemd, RotelServer, rotel, net_log_output)
+    socket_from_systemd = nil
+  end
 end

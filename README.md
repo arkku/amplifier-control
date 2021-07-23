@@ -112,7 +112,7 @@ file edited) and loaded with:
 ## Homekit Control
 
 I wrote a little Homebridge plugin to interface with the `rotel-server.rb`
-service, which makes it possible to control the amplifiar via Homekit (e.g.,
+service, which makes it possible to control the amplifier via Homekit (e.g.,
 "Hey Siri, turn off amplifier"). It resides in a [separate
 repository](https://github.com/arkku/homebridge-rotel-arkku/)
 for ease of installation into Homekit.

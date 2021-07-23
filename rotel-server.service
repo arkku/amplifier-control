@@ -1,0 +1,17 @@
+[Unit]
+Description=Rotel Server
+Wants=network-online.target
+After=network.target network-online.target
+
+[Service]
+User=shairport-sync
+Group=shairport-sync
+Type=simple
+Restart=always
+ExecStart=/etc/rotel/rotel-server.rb -v
+NonBlocking=true
+StandardOutput=syslog
+StandardError=syslog
+
+#[Install]
+#WantedBy=multi-user.target

@@ -1,0 +1,11 @@
+[Unit]
+Description=Rotel Server TCP Socket 65015
+
+[Socket]
+ListenStream=65015
+Accept=no
+BindIPv6Only=both
+NoDelay=true
+
+[Install]
+WantedBy=sockets.target
