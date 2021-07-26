@@ -396,7 +396,7 @@ class RotelAmplifier
     return if state.nil?
     if state
       send '!power_on'
-    elsif @power
+    elsif @power != false
       send '!power_off'
     end
     return !!state
